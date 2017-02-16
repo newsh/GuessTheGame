@@ -80,6 +80,13 @@ function apiRequest($method, $parameters) {
 
 	return exec_curl_request ( $handle, $parameters['chat_id'], $url );
 }
+function buildMainMenu(){ //Cretes simple menu with two buttons
+	$mainMenu = array ();
+	$btnStartGame = (object) array('text' => "Start Game" , 'callback_data' => '{"mainMenu":"startGame"}');
+	$btnSeeStats = (object) array('text' => "See Stats" , 'callback_data' => '{"mainMenu":"seeStats"}');
+	array_push($mainMenu,array($btnStartGame),array($btnSeeStats));
+	return $mainMenu;
+}
 function sendMessage($chat_id, $message) {
 	apiRequest ( "sendMessage", array (
 			'chat_id' => $chat_id,
@@ -87,6 +94,15 @@ function sendMessage($chat_id, $message) {
 			"text" => $message
 	) );
 
+}
+function sendMessageAndInlineKeyboard($chat_id, $message, $inlineKeyboard) {
+	apiRequest ( "sendMessage", array (
+			'chat_id' => $chat_id,
+			'parse_mode' => 'HTML',
+			"text" => $message,
+			'disable_notification' => true,
+			'reply_markup' => array ('inline_keyboard' =>$inlineKeyboard)
+	));
 }
 function initPlayer($chat_id) {
 	
@@ -107,10 +123,17 @@ function processCallbackQuery($callbackQuery) {
 	
 	$JsonCallbackData = json_decode($callbackData);
 	
-	// 	if(isset($JsonCallbackData->someKey)) {
-	// 		$var = $JsonCallbackData->someKey;
-	// 		$var2 = $JsonCallbackData->anotherKey;
-	// 	}
+		if(isset($JsonCallbackData->mainMenu)) {
+			$pickedOption = $JsonCallbackData->mainMenu;
+			switch ($pickedOption) {
+				case "startGame":
+					//Start Game
+					break;
+				case "seeStats":
+					//Show stats
+					break;
+			}
+		}
 	
 	apiRequest ( "answerCallbackQuery", array ("callback_query_id" => $callback_query_id));
 }
@@ -125,7 +148,7 @@ function processMessage($message) {
 
 		//The bot will react only to following commands given by the bot's user. All of them are entered by either keyboard button pressing or usage of bot's command list under "/".
 		if (strpos ( $text, "/start" ) === 0) {
-			sendMessage($chat_id, "<b>Welcome to Guess The Game!</b>");
+			sendMessageAndInlineKeyboard($chat_id, "<b>Welcome to Guess The Game!</b>", buildMainMenu());
 			initPlayer($chat_id);
 		}
 		else { } //User input not covered by cases above
