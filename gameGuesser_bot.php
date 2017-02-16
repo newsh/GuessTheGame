@@ -88,7 +88,15 @@ function sendMessage($chat_id, $message) {
 	) );
 
 }
-
+function initPlayer($chat_id) {
+	
+	$db = new PDO ( DSN.';dbname='.dbname, username, password );
+	$db->exec("SET NAMES utf8");
+	
+	$stmt = $db->prepare('INSERT INTO player(chat_id) VALUES (:chatId)');
+	$stmt->bindParam(':chatId', $chat_id);
+	$result = $stmt->execute();
+}
 function processCallbackQuery($callbackQuery) {
 	
 	//debug($callbackQuery);
@@ -117,8 +125,8 @@ function processMessage($message) {
 
 		//The bot will react only to following commands given by the bot's user. All of them are entered by either keyboard button pressing or usage of bot's command list under "/".
 		if (strpos ( $text, "/start" ) === 0) {
-
-			sendMessage($chat_id, "<b>Wel<b>come to Guess The Game!</b>");
+			sendMessage($chat_id, "<b>Welcome to Guess The Game!</b>");
+			initPlayer($chat_id);
 		}
 		else { } //User input not covered by cases above
 	
