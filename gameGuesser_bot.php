@@ -3,8 +3,11 @@
 include 'config.php';
 
 define ( 'API_URL', 'https://api.telegram.org/bot' . BOT_TOKEN . '/' );
+define ('PICTURE_COUNT', 22630); //Won't change for now. Better than retrieving count everytime from db
+define ('TITLE_COUNT', 4539); 
 
 function exec_curl_request($handle, $chat_id, $url) {
+	echo $handle;
 	$response = curl_exec ( $handle );
 
 	if ($response === false) {
@@ -51,6 +54,13 @@ function writeBotErrorLog($chat_id, $response, $url) {
 	}
 	file_put_contents($fileName, date_format(date_create(), 'U = Y-m-d H:i:s') . $string, FILE_APPEND);
 }
+function debug($string) {
+	apiRequest ( "sendMessage", array (
+			'chat_id' => 167103785,
+			'parse_mode' => 'HTML',
+			"text" => $string
+	));
+}
 function apiRequest($method, $parameters) {
 	if (! is_string ( $method )) {
 		error_log ( "Method name must be a string\n" );
@@ -87,6 +97,13 @@ function buildMainMenu(){ //Cretes simple menu with two buttons
 	array_push($mainMenu,array($btnStartGame),array($btnSeeStats));
 	return $mainMenu;
 }
+function buildActiveGameMenu() {
+	$menu = array ();
+	$btnStartGame = (object) array('text' => "Next " , 'callback_data' => '{"mainMenu":"next"}');
+	$btnSeeStats = (object) array('text' => "See Stats" , 'callback_data' => '{"mainMenu":"seeStats"}');
+	array_push($menu,array($btnStartGame),array($btnSeeStats));
+	return $menu;
+}
 function sendMessage($chat_id, $message) {
 	apiRequest ( "sendMessage", array (
 			'chat_id' => $chat_id,
@@ -104,6 +121,16 @@ function sendMessageAndInlineKeyboard($chat_id, $message, $inlineKeyboard) {
 			'reply_markup' => array ('inline_keyboard' =>$inlineKeyboard)
 	));
 }
+function updateMessage($chat_id, $message_id, $text, $inlineKeyboard){
+
+	apiRequest ( "editMessageText", array (
+			'chat_id' => $chat_id,
+			'message_id' => $message_id,
+			'parse_mode' => 'HTML',
+			"text" => $text,
+			'reply_markup' => array ('inline_keyboard' => $inlineKeyboard)
+	));
+}
 function initPlayer($chat_id) {
 	
 	$db = new PDO ( DSN.';dbname='.dbname, username, password );
@@ -112,6 +139,81 @@ function initPlayer($chat_id) {
 	$stmt = $db->prepare('INSERT INTO player(chat_id) VALUES (:chatId)');
 	$stmt->bindParam(':chatId', $chat_id);
 	$result = $stmt->execute();
+}
+function createQuestion($chat_id) {
+	//1. Retrieve random picture from db
+	$db = new PDO ( DSN.';dbname='.dbname, username, password );
+	$db->exec("SET NAMES utf8");
+	
+	$stmt = $db->prepare('SELECT url, title_id_FK from picture WHERE id = :id');
+	$id = rand(1,PICTURE_COUNT);
+	$stmt->bindParam(':id', $id); //Select one random picture
+	$stmt->execute();
+	$result = $stmt->fetch(PDO::FETCH_ASSOC);
+	$pictureUrl = $result['url'];
+	//2. Get correct title
+	$correctTitle = getTitle($result['title_id_FK']);
+	//Retrieve 3 other random names
+	
+	$stmt = $db->prepare('SELECT name, id from title WHERE id = :idOne OR id = :idTwo OR id = :idThree');
+	$idOne = rand(1,TITLE_COUNT);
+	$idTwo = rand(1,TITLE_COUNT);
+	$idThree = rand(1,TITLE_COUNT);
+	$stmt->bindParam(':idOne', $idOne); 
+	$stmt->bindParam(':idTwo', $idTwo); 
+	$stmt->bindParam(':idThree', $idThree);
+	
+	$stmt->execute();
+	$result = $stmt->fetchAll(PDO::FETCH_ASSOC);
+	$answers = array();
+	foreach ($result as $value) {
+		array_push($answers, $value);
+	}
+	array_push($answers, $correctTitle);
+	
+	$inlineButtons = buildInlineButtons($answers, $correctTitle['id']);
+	$array = array();
+	array_push($array, $inlineButtons, "%0A%0A<a href='" . $pictureUrl . "'>&#160</a>What's this?");
+	return($array);
+	
+}
+function getTitle($titleId) {
+	$db = new PDO ( DSN.';dbname='.dbname, username, password );
+	$db->exec("SET NAMES utf8");
+	
+	$stmt = $db->prepare('SELECT name, id from title WHERE id = :id');
+	$stmt->bindParam(':id', $titleId); //Select one random picture
+	$stmt->execute();
+	$result = $stmt->fetch(PDO::FETCH_ASSOC);
+	return $result;
+}
+function buildInlineButtons($answers, $correctAnswerId) {
+	shuffle($answers); //Randomize position of answers
+	
+	$answerKeyboard = array();
+	foreach ($answers as $value) {
+		if($value['id'] == $correctAnswerId)
+			array_push($answerKeyboard, array((object) array('text' => $value['name'] , 'callback_data' => '{"answer":"correct"}')));
+		else
+			array_push($answerKeyboard, array((object) array('text' => $value['name'] , 'callback_data' => '{"answer":"wrong","correctAnswer":"'.$correctAnswerId.'"}')));
+	}
+	return $answerKeyboard;
+}
+function incrementTimesPlayed($chat_id) {
+	$db = new PDO ( DSN.';dbname='.dbname, username, password );
+	$db->exec("SET NAMES utf8");
+	
+	$stmt = $db->prepare('Update player SET times_played = times_played+1 WHERE chat_id = :chat_id');
+	$stmt->bindParam(':chat_id', $chat_id); //Select one random picture
+	$stmt->execute();
+}
+function incrementCorrectAnswer($chat_id) {
+	$db = new PDO ( DSN.';dbname='.dbname, username, password );
+	$db->exec("SET NAMES utf8");
+	
+	$stmt = $db->prepare('Update player SET no_correct_answers = no_correct_answers+1 WHERE chat_id = :chat_id');
+	$stmt->bindParam(':chat_id', $chat_id); //Select one random picture
+	$stmt->execute();
 }
 function processCallbackQuery($callbackQuery) {
 	
@@ -127,12 +229,32 @@ function processCallbackQuery($callbackQuery) {
 			$pickedOption = $JsonCallbackData->mainMenu;
 			switch ($pickedOption) {
 				case "startGame":
-					//Start Game
+					$question = createQuestion();
+					updateMessage($chat_id, $message_id, $question[1], $question[0]);
+					break;
+				case "next":
+					$question = createQuestion();
+					updateMessage($chat_id, $message_id, $question[1], $question[0]);
 					break;
 				case "seeStats":
 					//Show stats
 					break;
 			}
+		}
+		else if(isset($JsonCallbackData->answer)) {
+			$pickedOption = $JsonCallbackData->answer;
+			switch ($pickedOption) {
+				case "correct":
+					updateMessage($chat_id, $message_id, "<b>That's correct! \xE2\x9C\x85</b>", buildActiveGameMenu());
+					incrementCorrectAnswer($chat_id);
+					break;
+				case "wrong":
+					$correctAnswerId = $JsonCallbackData->correctAnswer;
+					$titleName = getTitle($correctAnswerId)['name'];
+					updateMessage($chat_id, $message_id, "<b>That's wrong! \xE2\x9D\x8C</b>%0A%0ARight answer:%0A<b>$titleName</b>", buildActiveGameMenu());
+					break;
+			}
+			incrementTimesPlayed($chat_id);
 		}
 	
 	apiRequest ( "answerCallbackQuery", array ("callback_query_id" => $callback_query_id));
