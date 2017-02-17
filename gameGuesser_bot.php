@@ -215,6 +215,23 @@ function incrementCorrectAnswer($chat_id) {
 	$stmt->bindParam(':chat_id', $chat_id); //Select one random picture
 	$stmt->execute();
 }
+function getPlayerData($chat_id) {
+	$db = new PDO ( DSN.';dbname='.dbname, username, password );
+	$db->exec("SET NAMES utf8");
+	
+	$stmt = $db->prepare('SELECT times_played, no_correct_answers from player WHERE chat_id = :chat_id');
+	$stmt->bindParam(':chat_id', $chat_id); //Select one random picture
+	$stmt->execute();
+	$result = $stmt->fetch(PDO::FETCH_ASSOC);
+	
+	$timesPlayed = $result['times_played'];
+	$rightAnswers = $result['no_correct_answers'];
+	$rightInPerc = round($rightAnswers/$timesPlayed*100,2);
+	
+	$string = "Total played: $timesPlayed%0ARight answers: $rightAnswers%0A%0A$rightInPerc% answered correct!";
+	return $string;
+}
+
 function processCallbackQuery($callbackQuery) {
 	
 	//debug($callbackQuery);
@@ -237,7 +254,11 @@ function processCallbackQuery($callbackQuery) {
 					updateMessage($chat_id, $message_id, $question[1], $question[0]);
 					break;
 				case "seeStats":
-					//Show stats
+					apiRequest ( "answerCallbackQuery", array (
+							"callback_query_id" => $callback_query_id,
+							"show_alert" => true,
+							"text" => getPlayerData($chat_id)
+					));
 					break;
 			}
 		}
