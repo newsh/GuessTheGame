@@ -214,34 +214,50 @@ function initPlayer($chat_id) {
 
 	
 }
-function createQuestion() {
-	//1. Retrieve random picture from db
+function queryRandomTitle() {
+	
 	$db = new PDO ( DSN.';dbname='.dbname, username, password );
 	$db->exec("SET NAMES utf8");
 	
-	$stmt = $db->prepare('SELECT url, title_id_FK from picture WHERE id = :id');
-	$id = rand(1,PICTURE_COUNT);
-	$stmt->bindParam(':id', $id); //Select one random picture
-	$stmt->execute();
-	$result = $stmt->fetch(PDO::FETCH_ASSOC);
-	$pictureUrl = $result['url'];
+	$result = false;
+	while ($result == false) { //Query as long as a result is retrieved. Some ids can be missing, so not all random generated ids work.
+		$stmt = $db->prepare('SELECT name, id from title WHERE id = :id');
+		$id= rand(1,TITLE_COUNT);
+		$stmt->bindParam(':id', $id);
+		$stmt->execute();
+		$result = $stmt->fetch(PDO::FETCH_ASSOC);
+	}
+	return $result;
+}
+function queryRandomScreenshot() {
+	
+	$db = new PDO ( DSN.';dbname='.dbname, username, password );
+	$db->exec("SET NAMES utf8");
+	
+	$result = false;
+	
+	while ($result == false) { //Query as long as a result is retrieved. Some ids can be missing, so not all random generated ids work.
+		$stmt = $db->prepare('SELECT url, title_id_FK from picture WHERE id = :id');
+		$id = rand(1,PICTURE_COUNT);
+		$stmt->bindParam(':id', $id); //Select one random picture
+		$stmt->execute();
+		$result = $stmt->fetch(PDO::FETCH_ASSOC);
+		
+	}
+	
+	return $result;
+}
+function createQuestion() {
+	//1. Retrieve random picture from db
+	$randomScreenshot = queryRandomScreenshot();
+	$pictureUrl = $randomScreenshot['url'];
 	//2. Get correct title
-	$correctTitle = getTitle($result['title_id_FK']);
+	$correctTitle = getTitle($randomScreenshot['title_id_FK']);
 	//Retrieve 3 other random names
-	
-	$stmt = $db->prepare('SELECT name, id from title WHERE id = :idOne OR id = :idTwo OR id = :idThree');
-	$idOne = rand(1,TITLE_COUNT);
-	$idTwo = rand(1,TITLE_COUNT);
-	$idThree = rand(1,TITLE_COUNT);
-	$stmt->bindParam(':idOne', $idOne); 
-	$stmt->bindParam(':idTwo', $idTwo); 
-	$stmt->bindParam(':idThree', $idThree);
-	
-	$stmt->execute();
-	$result = $stmt->fetchAll(PDO::FETCH_ASSOC);
 	$answers = array();
-	foreach ($result as $value) {
-		array_push($answers, $value);
+	for($i=0; $i<3; $i++) {
+		$randomTitle = queryRandomTitle();
+		array_push($answers, $randomTitle);
 	}
 	array_push($answers, $correctTitle);
 	
@@ -252,22 +268,11 @@ function createQuestion() {
 	
 }
 function createExpertQuestion($chat_id) {
-	
-	
 	//1. Retrieve random picture from db
-	$db = new PDO ( DSN.';dbname='.dbname, username, password );
-	$db->exec("SET NAMES utf8");
-	
-	$stmt = $db->prepare('SELECT url, title_id_FK from picture WHERE id = :id');
-	$id = rand(1,PICTURE_COUNT);
-	$stmt->bindParam(':id', $id); //Select one random picture
-	$stmt->execute();
-	$result = $stmt->fetch(PDO::FETCH_ASSOC);
-	$pictureUrl = $result['url'];
-	//2. Get correct title
-	$correctTitle = getTitle($result['title_id_FK']);
+	$randomScreenshot = queryRandomScreenshot();
+	$pictureUrl = $randomScreenshot['url'];
 	//Write correct answer to db
-	writeCorrectAnswerToDb($chat_id, $result['title_id_FK']);
+	writeCorrectAnswerToDb($chat_id, $randomScreenshot['title_id_FK']);
 	//Create keyboard with buttons "I don't know. Next./Exit"
 	$array = array();
 	array_push($array, array(array((object) array('text' => "I don't know." , 'callback_data' => '{"mainMenu":"dontKnow"}'))), "%0A%0A<a href='" . $pictureUrl . "'>&#160</a>What's this? Type the name below.");
@@ -432,7 +437,8 @@ function processCallbackQuery($callbackQuery) {
 			else {
 				$correct_id = getCorrectIdExpert($chat_id);
 				$titleName = getTitle($correct_id)['name'];
-				updateMessage($chat_id, $message_id, "<b>$pickedOption?%0AThat's wrong! \xE2\x9D\x8C</b>%0A%0ARight answer:%0A<b>$titleName</b>", buildActiveGameMenuExpert());
+				$wrongTitleName = getTitle($pickedOption)['name'];
+				updateMessage($chat_id, $message_id, "<b>$wrongTitleName?%0AThat's wrong! \xE2\x9D\x8C</b>%0A%0ARight answer:%0A<b>$titleName</b>", buildActiveGameMenuExpert());
 			}		
 			incrementTimesPlayed($chat_id);
 		}
