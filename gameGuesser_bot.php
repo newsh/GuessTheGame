@@ -95,7 +95,9 @@ function buildMainMenu(){ //Cretes simple menu with two buttons
 	$btnStartEasy = (object) array('text' => "Start Easy Mode" , 'callback_data' => '{"mainMenu":"startEasy"}');
 	$btnStartExpert = (object) array('text' => "Start Expert Mode" , 'callback_data' => '{"mainMenu":"startExpert"}');
 	$btnSeeStats = (object) array('text' => "See Stats" , 'callback_data' => '{"mainMenu":"seeStats"}');
-	array_push($mainMenu,array($btnStartEasy),array($btnStartExpert),array($btnSeeStats));
+	$btnMyCollection = (object) array('text' => "My Collection" , 'callback_data' => '{"mainMenu":"collection"}');
+	
+	array_push($mainMenu,array($btnStartEasy),array($btnStartExpert),array($btnSeeStats),array($btnMyCollection));
 	return $mainMenu;
 }
 function buildActiveGameMenu() {
@@ -148,10 +150,15 @@ function searchTitleByName($searchString){ //Searches database for games similar
 		$nameInDb = str_replace("'", "", strtolower($element['name']));
 		$searchString = strtolower($searchString);
 		similar_text($nameInDb, $searchString, $percent);
-		if(round($percent >50,2)) { //Get all titles with match rate of at least 50.00%
+		if (strpos($nameInDb, $searchString) !== false) {
+			$element['perc'] = '100';
+			array_push($suggestionsArray, $element);
+		}
+		else if(round($percent >50,2)) { //Get all titles with match rate of at least 50.00%
 			$element['perc'] = round($percent,2);
 			array_push($suggestionsArray, $element);
 		}
+		
 	}
 
 	$percentageArray = array();
@@ -237,7 +244,7 @@ function queryRandomScreenshot() {
 	$result = false;
 	
 	while ($result == false) { //Query as long as a result is retrieved. Some ids can be missing, so not all random generated ids work.
-		$stmt = $db->prepare('SELECT url, title_id_FK from picture WHERE id = :id');
+		$stmt = $db->prepare('SELECT * from picture WHERE id = :id');
 		$id = rand(1,PICTURE_COUNT);
 		$stmt->bindParam(':id', $id); //Select one random picture
 		$stmt->execute();
@@ -246,6 +253,16 @@ function queryRandomScreenshot() {
 	}
 	
 	return $result;
+}
+function getScreenshotUrlById($screenshotId) {
+	$db = new PDO ( DSN.';dbname='.dbname, username, password );
+	$db->exec("SET NAMES utf8");
+	
+	$stmt = $db->prepare('SELECT url from picture WHERE id = :id');
+	$stmt->bindParam(':id', $screenshotId); //Select one random picture
+	$stmt->execute();
+	$result = $stmt->fetch(PDO::FETCH_ASSOC);
+	return $result['url'];
 }
 function createQuestion() {
 	//1. Retrieve random picture from db
@@ -261,7 +278,7 @@ function createQuestion() {
 	}
 	array_push($answers, $correctTitle);
 	
-	$inlineButtons = buildInlineButtons($answers, $correctTitle['id']);
+	$inlineButtons = buildInlineButtons($answers, $correctTitle['id'], $randomScreenshot['id']);
 	$array = array();
 	array_push($array, $inlineButtons, "%0A%0A<a href='" . $pictureUrl . "'>&#160</a>What's this?");
 	return($array);
@@ -270,12 +287,13 @@ function createQuestion() {
 function createExpertQuestion($chat_id) {
 	//1. Retrieve random picture from db
 	$randomScreenshot = queryRandomScreenshot();
+	incrementScreenshotSeen($randomScreenshot);
 	$pictureUrl = $randomScreenshot['url'];
 	//Write correct answer to db
-	writeCorrectAnswerToDb($chat_id, $randomScreenshot['title_id_FK']);
+	writeCorrectAnswerToDb($chat_id, $randomScreenshot['title_id_FK'], $randomScreenshot['id']);
 	//Create keyboard with buttons "I don't know. Next./Exit"
 	$array = array();
-	array_push($array, array(array((object) array('text' => "I don't know." , 'callback_data' => '{"mainMenu":"dontKnow"}'))), "%0A%0A<a href='" . $pictureUrl . "'>&#160</a>What's this? Type the name below.");
+	array_push($array, array(array((object) array('text' => "I don't know." , 'callback_data' => '{"mainMenu":"dontKnow"}'))), "%0A%0A<a href='" . $pictureUrl . "'>&#160</a>What's this? Type the name below.%0A{$randomScreenshot['no_correct_answers']} out of {$randomScreenshot['times_played']} people knew the answer.");
 	return($array);
 }
 function answerIsCorrect($pickedOption, $chat_id) {
@@ -312,13 +330,13 @@ function getCorrectIdExpert($chat_id) {
 	$result = $stmt->fetch(PDO::FETCH_ASSOC);
 	return $result['correct_answer'];
 }
-function buildInlineButtons($answers, $correctAnswerId) {
+function buildInlineButtons($answers, $correctAnswerId, $screenshotId) {
 	shuffle($answers); //Randomize position of answers
 	
 	$answerKeyboard = array();
 	foreach ($answers as $value) {
 		if($value['id'] == $correctAnswerId)
-			array_push($answerKeyboard, array((object) array('text' => $value['name'] , 'callback_data' => '{"answer":"correct"}')));
+			array_push($answerKeyboard, array((object) array('text' => $value['name'] , 'callback_data' => '{"answer":"correct","screenshotId":"'.$screenshotId.'"}')));
 		else
 			array_push($answerKeyboard, array((object) array('text' => $value['name'] , 'callback_data' => '{"answer":"wrong","correctAnswer":"'.$correctAnswerId.'"}')));
 	}
@@ -332,13 +350,102 @@ function incrementTimesPlayed($chat_id) {
 	$stmt->bindParam(':chat_id', $chat_id); //Select one random picture
 	$stmt->execute();
 }
+function incrementTimesPlayedExpert($chat_id) {
+	$db = new PDO ( DSN.';dbname='.dbname, username, password );
+	$db->exec("SET NAMES utf8");
+
+	$stmt = $db->prepare('Update player SET times_played_expert = times_played_expert+1 WHERE chat_id = :chat_id');
+	$stmt->bindParam(':chat_id', $chat_id); //Select one random picture
+	$stmt->execute();
+}
 function incrementCorrectAnswer($chat_id) {
 	$db = new PDO ( DSN.';dbname='.dbname, username, password );
 	$db->exec("SET NAMES utf8");
 	
 	$stmt = $db->prepare('Update player SET no_correct_answers = no_correct_answers+1 WHERE chat_id = :chat_id');
-	$stmt->bindParam(':chat_id', $chat_id); //Select one random picture
+	$stmt->bindParam(':chat_id', $chat_id); 
 	$stmt->execute();
+}
+function incrementCorrectAnswerExpert($chat_id) {
+	$db = new PDO ( DSN.';dbname='.dbname, username, password );
+	$db->exec("SET NAMES utf8");
+
+	$stmt = $db->prepare('Update player SET no_correct_answers_expert = no_correct_answers_expert+1 WHERE chat_id = :chat_id');
+	$stmt->bindParam(':chat_id', $chat_id);
+	$stmt->execute();
+}
+function incrementScreenshotSeen($randomScreenshot) {
+	$db = new PDO ( DSN.';dbname='.dbname, username, password );
+	$db->exec("SET NAMES utf8");
+	$stmt = $db->prepare('Update picture SET times_played = times_played+1 WHERE id = :id');
+	$id = $randomScreenshot['id'];
+	$stmt->bindParam(':id', $id);
+	$stmt->execute();
+}
+function incrementCorrectAnswerScreenshot($chat_id) {
+	$db = new PDO ( DSN.';dbname='.dbname, username, password );
+	$db->exec("SET NAMES utf8");
+	$stmt = $db->prepare('SELECT current_screenshot_id FROM player_state WHERE chat_id = :chat_id');
+	$stmt->bindParam(':chat_id', $chat_id);
+	$stmt->execute();
+	$result = $stmt->fetch(PDO::FETCH_ASSOC);
+	$screenId = $result['current_screenshot_id'];
+
+	$stmt = $db->prepare('Update picture SET no_correct_answers = no_correct_answers+1 WHERE id = :id');
+	$stmt->bindParam(':id', $screenId);
+	$stmt->execute();
+}
+function savePicureToCollection($chat_id,$screenshotId) {
+	$db = new PDO ( DSN.';dbname='.dbname, username, password );
+	$db->exec("SET NAMES utf8"); //INSERT INTO `gameGuesser`.`pictures_collected` (`chat_id`, `picture_id`) VALUES ('123', '456');
+	$stmt = $db->prepare('INSERT INTO pictures_collected(chat_id, picture_id) VALUES (:chat_id, :picture_id)');
+	$stmt->bindParam(':chat_id', $chat_id);
+	$stmt->bindParam(':picture_id', $screenshotId);
+	$stmt->execute();
+}
+function buildCollection($chat_id) {
+	$unlockedGames = getUnlockedGames($chat_id);
+	
+	$inlineKeyboard = array();
+	
+	foreach ($unlockedGames as $value) {
+		array_push($inlineKeyboard, array((object) array('text' => $value['name'], 'callback_data' => '{"collectionId":"'.$value['id'].'"}')));
+	}
+	array_push($inlineKeyboard, array((object) array('text' => "Back \xE2\x86\xA9\xEF\xB8\x8F", 'callback_data' => '{"mainMenu":"exit"}')));
+	
+	return $inlineKeyboard;
+}
+function getUnlockedGames($chat_id) {
+	$db = new PDO ( DSN.';dbname='.dbname, username, password );
+	$db->exec("SET NAMES utf8"); //INSERT INTO `gameGuesser`.`pictures_collected` (`chat_id`, `picture_id`) VALUES ('123', '456');
+	$stmt = $db->prepare('SELECT title.id, name FROM pictures_collected INNER join picture ON pictures_collected.picture_id = picture.id INNER JOIN title ON title.id = title_id_FK WHERE chat_id = :chat_id ORDER by name');
+	$stmt->bindParam(':chat_id', $chat_id);
+	$stmt->execute();
+	$result = $stmt->fetchAll(PDO::FETCH_ASSOC);
+	return $result;
+}
+function buildTitleScreenshots($chat_id, $titleId) {
+	$unlockedScreenshots = getUnlockedScreenshots($chat_id, $titleId); 
+	
+	$inlineKeyboard = array();
+	
+	$counter = 1;
+	foreach ($unlockedScreenshots as $value) {
+		array_push($inlineKeyboard, array((object) array('text' => "#$counter", 'callback_data' => '{"screenshotId":"'.$value['id'].'"}')));
+		$counter++;
+	}
+	array_push($inlineKeyboard, array((object) array('text' => "Back \xE2\x86\xA9\xEF\xB8\x8F", 'callback_data' => '{"mainMenu":"exit"}')));
+	return $inlineKeyboard;
+}
+function getUnlockedScreenshots($chat_id, $titleId) {
+	$db = new PDO ( DSN.';dbname='.dbname, username, password );
+	$db->exec("SET NAMES utf8"); //INSERT INTO `gameGuesser`.`pictures_collected` (`chat_id`, `picture_id`) VALUES ('123', '456');
+	$stmt = $db->prepare('SELECT picture.id, url FROM pictures_collected INNER join picture ON pictures_collected.picture_id = picture.id INNER JOIN title ON title.id = title_id_FK WHERE chat_id = :chat_id AND title.id = :titleId');
+	$stmt->bindParam(':chat_id', $chat_id);
+	$stmt->bindParam(':titleId', $titleId);
+	$stmt->execute();
+	$result = $stmt->fetchAll(PDO::FETCH_ASSOC);
+	return $result;
 }
 function getPlayerData($chat_id) {
 	$db = new PDO ( DSN.';dbname='.dbname, username, password );
@@ -356,25 +463,24 @@ function getPlayerData($chat_id) {
 	$string = "Total played: $timesPlayed%0ARight answers: $rightAnswers%0A%0A$rightInPerc% answered correct!";
 	return $string;
 }
-function writeCorrectAnswerToDb($chat_id, $correct_answer) {
+function writeCorrectAnswerToDb($chat_id, $correct_answer, $screenshot_id) {
 	$db = new PDO ( DSN.';dbname='.dbname, username, password );
 	$db->exec("SET NAMES utf8");
 	
-	$stmt = $db->prepare('UPDATE player_state SET correct_answer = :correct_answer WHERE chat_id = :chat_id');
+	$stmt = $db->prepare('UPDATE player_state SET correct_answer = :correct_answer, current_screenshot_id = :screenshot_id WHERE chat_id = :chat_id');
 	$stmt->bindParam(':chat_id', $chat_id);
 	$stmt->bindParam(':correct_answer', $correct_answer);
+	$stmt->bindParam(':screenshot_id', $screenshot_id);
 	$result = $stmt->execute();
 }
 function processCallbackQuery($callbackQuery) {
 	
-	//debug($callbackQuery);
 	$chat_id = $callbackQuery['from']['id'];
 	$callbackData = $callbackQuery['data'];
 	$callback_query_id = $callbackQuery['id'];
 	$message_id = $callbackQuery['message']['message_id'];
 	
 	$JsonCallbackData = json_decode($callbackData);
-	
 		if(isset($JsonCallbackData->mainMenu)) {
 			$pickedOption = $JsonCallbackData->mainMenu;
 			switch ($pickedOption) {
@@ -395,6 +501,7 @@ function processCallbackQuery($callbackQuery) {
 					$titleName = getTitle($titleId)['name'];
 					$question = createExpertQuestion($chat_id);
 					updateMessage($chat_id, $message_id, "Right answer:%0A<b>$titleName</b>", buildActiveGameMenuExpert());
+					incrementTimesPlayedExpert($chat_id);
 //					updateMessage($chat_id, $message_id, "<b>Right answer:%0A<b>$titleName</b>", buildActiveGameMenu());
 					break;
 				case "nextExpert":
@@ -408,6 +515,9 @@ function processCallbackQuery($callbackQuery) {
 							"text" => getPlayerData($chat_id)
 					));
 					break;
+				case "collection":
+					updateMessage($chat_id, $message_id, "<b>xx out of yyyyy</b> screenshots collected", buildCollection($chat_id));
+					break;
 				case "exit":
 					updateMessage($chat_id, $message_id, "<b>Welcome to Guess The Game!</b>", buildMainMenu());
 					break;
@@ -419,6 +529,8 @@ function processCallbackQuery($callbackQuery) {
 				case "correct":
 					updateMessage($chat_id, $message_id, "<b>That's correct! \xE2\x9C\x85</b>", buildActiveGameMenu());
 					incrementCorrectAnswer($chat_id);
+					$screenshotId = $JsonCallbackData->screenshotId;
+					savePicureToCollection($chat_id,$screenshotId);
 					break;
 				case "wrong":
 					$correctAnswerId = $JsonCallbackData->correctAnswer;
@@ -432,7 +544,8 @@ function processCallbackQuery($callbackQuery) {
 			$pickedOption = $JsonCallbackData->expertAnswer;
 			if(answerIsCorrect($pickedOption, $chat_id)) {
 				updateMessage($chat_id, $message_id, "<b>That's correct! \xE2\x9C\x85</b>", buildActiveGameMenuExpert());
-				incrementCorrectAnswer($chat_id);
+				incrementCorrectAnswerExpert($chat_id);
+				incrementCorrectAnswerScreenshot($chat_id);			
 			}
 			else {
 				$correct_id = getCorrectIdExpert($chat_id);
@@ -440,11 +553,22 @@ function processCallbackQuery($callbackQuery) {
 				$wrongTitleName = getTitle($pickedOption)['name'];
 				updateMessage($chat_id, $message_id, "<b>$wrongTitleName?%0AThat's wrong! \xE2\x9D\x8C</b>%0A%0ARight answer:%0A<b>$titleName</b>", buildActiveGameMenuExpert());
 			}		
-			incrementTimesPlayed($chat_id);
+			incrementTimesPlayedExpert($chat_id);
+		}
+		else if(isset($JsonCallbackData->collectionId)) {
+			$titleId = $JsonCallbackData->collectionId;
+			updateMessage($chat_id, $message_id, "<code>GAME TITLE</code>", buildTitleScreenshots($chat_id, $titleId));
+		}
+		else if(isset($JsonCallbackData->screenshotId)) {
+			$screenshotId = $JsonCallbackData->screenshotId;
+			
+			$screenshotUrl = getScreenshotUrlById($screenshotId);
+			updateMessage($chat_id, $message_id, "$screenshotUrl", array(array((object) array('text' => "Back \xE2\x86\xA9\xEF\xB8\x8F", 'callback_data' => '{"mainMenu":"exit"}'))));
 		}
 	
 	apiRequest ( "answerCallbackQuery", array ("callback_query_id" => $callback_query_id));
 }
+
 function processMessage($message) {
 	
 	$text = $message ['text'];
