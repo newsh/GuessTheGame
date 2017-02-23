@@ -403,38 +403,168 @@ function savePicureToCollection($chat_id,$screenshotId) {
 	$stmt->bindParam(':picture_id', $screenshotId);
 	$stmt->execute();
 }
-function buildCollection($chat_id) {
-	$unlockedGames = getUnlockedGames($chat_id);
+function countCollectedScreenshots($chat_id){
+	$db = new PDO ( DSN.';dbname='.dbname, username, password );
+	$db->exec("SET NAMES utf8"); //INSERT INTO `gameGuesser`.`pictures_collected` (`chat_id`, `picture_id`) VALUES ('123', '456');
+	$stmt = $db->prepare('SELECT Count(*) FROM pictures_collected WHERE chat_id =:chat_id');
+	$stmt->bindParam(':chat_id', $chat_id);
+	$stmt->execute();
+	$result = $stmt->fetch(PDO::FETCH_ASSOC);
+	$noScreenshotsCollected = $result['Count(*)'];
 	
+	$db = new PDO ( DSN.';dbname='.dbname, username, password );
+	$db->exec("SET NAMES utf8"); //INSERT INTO `gameGuesser`.`pictures_collected` (`chat_id`, `picture_id`) VALUES ('123', '456');
+	$stmt = $db->prepare('SELECT Count(*) FROM picture');
+	$stmt->execute();
+	$result = $stmt->fetch(PDO::FETCH_ASSOC);
+	$noTotalScreenshots = $result['Count(*)'];
+	
+	return $noScreenshotsCollected . "/" . $noTotalScreenshots;
+}
+function inlineBtnMyCollectionPressed($chat_id, $message_id) {
+	
+	$unlockedGamesButtons = getUnlockedGamesButtons($chat_id);
 	$inlineKeyboard = array();
 	
-	foreach ($unlockedGames as $value) {
-		array_push($inlineKeyboard, array((object) array('text' => $value['name'], 'callback_data' => '{"collectionId":"'.$value['id'].'"}')));
+	foreach ($unlockedGamesButtons as $value) {
+		array_push($inlineKeyboard, array((object) array('text' => $value['name'], 'callback_data' => '{"collectionId":"'.$value['id'].'", "elementNo":"'.$value['backFromTitleView'].'"}')));
 	}
 	array_push($inlineKeyboard, array((object) array('text' => "Back \xE2\x86\xA9\xEF\xB8\x8F", 'callback_data' => '{"mainMenu":"exit"}')));
 	
-	return $inlineKeyboard;
+	inlinePagingBtnPressed($chat_id, "1", $message_id);
 }
-function getUnlockedGames($chat_id) {
+function inlinePagingBtnPressed($chat_id, $pressedButton, $message_id) {
+
+	$inlineKeyboard = array(); //Represents all buttons including games + paging buttons + back button. First all games are added then paging interface
+	$pagingInterface = array(); //Represents paging interface alone
+
+	$unlockedGamesButtons = getUnlockedGamesButtons($chat_id);
+	
+	$pressedButtonVal = intval($pressedButton); //Get button pressed by user as integer (e.g 1,2,3,4,5...)
+
+	$pages = ceil(sizeof($unlockedGamesButtons)/10); //Calculates the number of pages needed. When 28 games available => 3 pages needed. 10 Buttons per single page.  28/10 = 2,3 ->ceil->3
+
+	//Fill up keyboard with games. If button "1" pressed, elements from [0] to [9] on array. When button "2" pressed add elements from [10] to [19] on array and so on...
+	$counter = 0;
+	foreach ($unlockedGamesButtons as $k => $element) {
+		if(($k+10 >= $pressedButtonVal*10) && ($k+10 < $pressedButtonVal*10+10)) {
+			array_push($inlineKeyboard, $element);
+			$counter++;
+		}
+	}
+
+
+	if($pages > 4) { //More than 40 buttons need to be displayed. This means we need buttons with ">>/<<". Interface will look like this " -1- 2 3 4> 13>> "
+		if($pressedButton == "1") {
+			$btnPos1 = "· 1 ·";
+			$btnPos2 = "2";
+			$btnPos3 = "3";
+			$btnPos4 = "4 ›";
+			$btnPos5 = strval($pages) . ' ››';
+		}
+		else if($pressedButton == "2") {
+			$btnPos1 = "1";
+			$btnPos2 = "· 2 · ";
+			$btnPos3 = "3";
+			$btnPos4 = "4 ›";
+			$btnPos5 = strval($pages) . ' ››';
+		}
+		else if($pressedButton == "3") {
+			$btnPos1 = "1";
+			$btnPos2 = "2";
+			$btnPos3 = "· 3 ·";
+			$btnPos4 = "4 ›";
+			$btnPos5 = strval($pages) . ' ››';
+		}
+		else if($pressedButton == $pages) {
+			$btnPos1 = "‹‹ 1";
+			$btnPos2 = '‹ ' . strval($pages-3);
+			$btnPos3 = strval($pages-2);
+			$btnPos4 = strval($pages-1);
+			$btnPos5 = '· ' . strval($pages) . ' ·' ;
+		}
+		else if(intval($pressedButton) == $pages-2) {
+			$btnPos1 = "‹‹ 1";
+			$btnPos2 = '‹ ' . strval($pages-3);
+			$btnPos3 = '· ' . strval($pages-2) . ' ·';
+			$btnPos4 = strval($pages-1);
+			$btnPos5 = strval($pages);
+
+		}
+		else if(intval($pressedButton) == $pages-1) {
+			$btnPos1 = "‹‹ 1";
+			$btnPos2 = '‹ ' . strval($pages-3);
+			$btnPos3 = strval($pages-2);
+			$btnPos4 = '· ' . strval($pages-1) . ' ·';
+			$btnPos5 = strval($pages);
+
+		}
+
+		else {
+			$btnPos1 = '‹‹ 1';
+			$btnPos2 = '‹ ' . strval(intval($pressedButton)-1);
+			$btnPos3 = '· ' . strval($pressedButton) . ' ·';
+			$btnPos4 = strval(intval($pressedButton)+1) . ' ›';
+			$btnPos5 = strval($pages) . ' ››';
+
+		}
+			
+		$btnPos1 = (object) array('text'=>$btnPos1 , 'callback_data' => '{"inlinePaging":"' . str_replace(array("‹","›","·"," "), "",$btnPos1) . '"}'  );
+		$btnPos2 = (object) array('text'=>$btnPos2 , 'callback_data' => '{"inlinePaging":"' . str_replace(array("‹","›","·"," "), "",$btnPos2) . '"}'  );
+		$btnPos3 = (object) array('text'=>$btnPos3 , 'callback_data' => '{"inlinePaging":"' . str_replace(array("‹","›","·"," "), "",$btnPos3) . '"}'  );
+		$btnPos4 = (object) array('text'=>$btnPos4 , 'callback_data' => '{"inlinePaging":"' . str_replace(array("‹","›","·"," "), "",$btnPos4) . '"}'  );
+		$btnPos5 = (object) array('text'=>$btnPos5 , 'callback_data' => '{"inlinePaging":"' . str_replace(array("‹","›","·"," "), "",$btnPos5) . '"}'  );
+			
+		//Add paging buttons to keyboard below.
+		array_push($pagingInterface, $btnPos1, $btnPos2, $btnPos3, $btnPos4, $btnPos5);
+
+	}
+	else if($pages != 1) { //Less than 40 buttons need to be shown. Paging interface will look like this "1,2,3,4"
+
+			
+		$i = 1;
+		for($i=1 ; $i<=$pages; $i++) { //Builds inline paging interface. e.g "1,·2·,3"
+			if($pressedButtonVal == $i)
+				array_push($pagingInterface , (object) array('text'=> '· ' . strval($i) .' ·' , 'callback_data' => '{"inlinePaging":"' . strval($i) . '"}' )); //Mark current page with "·3·" symbol
+				else
+					array_push($pagingInterface , (object) array('text'=>strval($i) , 'callback_data' => '{"inlinePaging":"' . strval($i) . '"}' ));
+		}
+			
+	}
+
+	$backBtn = array('text' => "\xE2\x86\xA9\xEF\xB8\x8F Back" , 'callback_data' => '{"mainMenu":"exit"}');
+
+	array_push($inlineKeyboard, $pagingInterface, array($backBtn)); //Place paging buttons + back button below games button
+	updateMessage($chat_id, $message_id, "<code>".countCollectedScreenshots($chat_id)." Screenshots collected</code>", $inlineKeyboard); //Show keyboard with games,paging interface and count of update types at top as text
+
+}
+function getUnlockedGamesButtons($chat_id) {
 	$db = new PDO ( DSN.';dbname='.dbname, username, password );
 	$db->exec("SET NAMES utf8"); //INSERT INTO `gameGuesser`.`pictures_collected` (`chat_id`, `picture_id`) VALUES ('123', '456');
 	$stmt = $db->prepare('SELECT title.id, name FROM pictures_collected INNER join picture ON pictures_collected.picture_id = picture.id INNER JOIN title ON title.id = title_id_FK WHERE chat_id = :chat_id ORDER by name');
 	$stmt->bindParam(':chat_id', $chat_id);
 	$stmt->execute();
 	$result = $stmt->fetchAll(PDO::FETCH_ASSOC);
-	return $result;
-}
-function buildTitleScreenshots($chat_id, $titleId) {
-	$unlockedScreenshots = getUnlockedScreenshots($chat_id, $titleId); 
 	
+	$buttonsArray = array();
+	$counter = 0;
+	foreach ($result as $value) {
+		array_push($buttonsArray, array((object) array('text' => $value['name'], 'callback_data' => '{"collectionId":"'.$value['id'].'","backFromTitleView":"'.$counter.'"}')));
+		$counter++;
+	}
+	
+	return $buttonsArray;
+}
+function buildTitleScreenshotsOverview($chat_id, $titleId, $elementNo) {
+	$unlockedScreenshots = getUnlockedScreenshots($chat_id, $titleId); 
 	$inlineKeyboard = array();
 	
 	$counter = 1;
 	foreach ($unlockedScreenshots as $value) {
-		array_push($inlineKeyboard, array((object) array('text' => "#$counter", 'callback_data' => '{"screenshotId":"'.$value['id'].'"}')));
+		array_push($inlineKeyboard, array((object) array('text' => "#$counter", 'callback_data' => '{"screenshotId":"'.$value['id'].'","titleId":"'.$titleId.'","elementNo":"'.$elementNo.'"}')));
 		$counter++;
 	}
-	array_push($inlineKeyboard, array((object) array('text' => "Back \xE2\x86\xA9\xEF\xB8\x8F", 'callback_data' => '{"mainMenu":"exit"}')));
+	array_push($inlineKeyboard, array((object) array('text' => "Back \xE2\x86\xA9\xEF\xB8\x8F", 'callback_data' => '{"backFromTitleView":"'.$elementNo.'"}')));
 	return $inlineKeyboard;
 }
 function getUnlockedScreenshots($chat_id, $titleId) {
@@ -479,7 +609,7 @@ function processCallbackQuery($callbackQuery) {
 	$callbackData = $callbackQuery['data'];
 	$callback_query_id = $callbackQuery['id'];
 	$message_id = $callbackQuery['message']['message_id'];
-	
+	//debug($callbackData);
 	$JsonCallbackData = json_decode($callbackData);
 		if(isset($JsonCallbackData->mainMenu)) {
 			$pickedOption = $JsonCallbackData->mainMenu;
@@ -516,7 +646,7 @@ function processCallbackQuery($callbackQuery) {
 					));
 					break;
 				case "collection":
-					updateMessage($chat_id, $message_id, "<b>xx out of yyyyy</b> screenshots collected", buildCollection($chat_id));
+					inlineBtnMyCollectionPressed($chat_id, $message_id);
 					break;
 				case "exit":
 					updateMessage($chat_id, $message_id, "<b>Welcome to Guess The Game!</b>", buildMainMenu());
@@ -557,13 +687,31 @@ function processCallbackQuery($callbackQuery) {
 		}
 		else if(isset($JsonCallbackData->collectionId)) {
 			$titleId = $JsonCallbackData->collectionId;
-			updateMessage($chat_id, $message_id, "<code>GAME TITLE</code>", buildTitleScreenshots($chat_id, $titleId));
+			$elementNo = $JsonCallbackData->backFromTitleView;
+			$titleName = getTitle($titleId)['name'];
+			updateMessage($chat_id, $message_id, "<code>$titleName</code>", buildTitleScreenshotsOverview($chat_id, $titleId, $elementNo));
 		}
 		else if(isset($JsonCallbackData->screenshotId)) {
 			$screenshotId = $JsonCallbackData->screenshotId;
+			$titleId = $JsonCallbackData->titleId;
+			$titleName = getTitle($titleId)['name'];
+			$elementNo = $JsonCallbackData->elementNo;
 			
 			$screenshotUrl = getScreenshotUrlById($screenshotId);
-			updateMessage($chat_id, $message_id, "$screenshotUrl", array(array((object) array('text' => "Back \xE2\x86\xA9\xEF\xB8\x8F", 'callback_data' => '{"mainMenu":"exit"}'))));
+			updateMessage($chat_id, $message_id, "<a href='" . $screenshotUrl . "'>&#160</a><code>$titleName</code>", array(array((object) array('text' => "Back \xE2\x86\xA9\xEF\xB8\x8F", 'callback_data' => '{"collectionId":"'.$titleId.'","backFromTitleView":"'.$elementNo.'"}'))));
+		}
+		else if((isset($JsonCallbackData->inlinePaging))) {
+			$pressedButton = $JsonCallbackData->inlinePaging; //Can be 1,2,3, >>, <<
+			inlinePagingBtnPressed($chat_id, $pressedButton, $message_id);
+		}
+		else if((isset($JsonCallbackData->backFromTitleView))) { // Inlinebtn "back" pressed on games's screenshotview
+				
+			$elementNo = $JsonCallbackData->backFromTitleView;
+			if($elementNo==0) $elementNo=1; //Quick fix for element number 0 on array. Would lead to 0 division
+			if(!($elementNo%10)) $elementNo++; //Quick fix for element number 10,20... This would lead to 10/10 = 1, 20/10 = 2 and ceilingOperator is useless. Will stay the same
+				
+			$pressedButton = ceil($elementNo/10); //E.g: Element number 26 would be on page 3.
+			inlinePagingBtnPressed($chat_id, $pressedButton, $message_id);
 		}
 	
 	apiRequest ( "answerCallbackQuery", array ("callback_query_id" => $callback_query_id));
