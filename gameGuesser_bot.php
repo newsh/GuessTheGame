@@ -56,10 +56,29 @@ function writeBotErrorLog($chat_id, $response, $url) {
 }
 function debug($string) {
 	apiRequest ( "sendMessage", array (
-			'chat_id' => 167103785, //Your own chat_id goes here
+			'chat_id' => ADMIN_CHAT_ID,
 			'parse_mode' => 'HTML',
 			"text" => $string
 	));
+}
+function giveFeedback($message) {
+
+	$text = $message['text'];
+	$senderName = $message['from']['username'];
+	$chat_id = $message['from']['id'];
+	$chatName = $message['reply_to_message']['from']['first_name'];
+
+	$feedbackString = "\xf0\x9f\x93\xa2<b>Feedback</b>\xf0\x9f\x93\xa2%0A$chatName%0A$text%0Auser: $senderName chat_id:%20$chat_id";
+
+	file_get_contents("https://api.telegram.org/bot".BOT_TOKEN."/sendMessage?chat_id=".ADMIN_CHAT_ID."&parse_mode=HTML&text=" . $feedbackString);
+
+	apiRequest ( "sendMessage", array (
+			'chat_id' => $chat_id,
+			'parse_mode' => 'HTML',
+			"text" => "Thanks for your feedback!"
+
+	));
+	sendMessageAndInlineKeyboard($chat_id, "<b>Welcome to Guess The Game!</b>%0A%0A<pre>Recognize games, fill your collection, earn points, climb the leaderboard!</pre>%0A%0A<i>Hints used: +50pts%0ANo hints used: +500pts</i>", buildMainMenu());
 }
 function apiRequest($method, $parameters) {
 	if (! is_string ( $method )) {
@@ -90,7 +109,7 @@ function apiRequest($method, $parameters) {
 
 	return exec_curl_request ( $handle, $parameters['chat_id'], $url );
 }
-function buildMainMenu(){ //Cretes simple menu with two buttons
+function buildMainMenu(){ //Creates simple menu with buttons
 	$mainMenu = array ();
 	$btnStartGuessing = (object) array('text' => "Start Guessing" , 'callback_data' => '{"mainMenu":"startGuessing"}');
 	$btnLeaderboard = (object) array('text' => "Leaderboard" , 'callback_data' => '{"mainMenu":"leaderBoard"}');
@@ -440,13 +459,21 @@ function inlineBtnMyCollectionPressed($chat_id, $message_id) {
 	
 	inlinePagingBtnPressed($chat_id, "1", $message_id);
 }
+function inlineBtnSendFeedbackPressed($chat_id, $message_id) {
+	apiRequest ( "sendMessage", array (
+			'chat_id' => $chat_id,
+			'text' => "Found something not working right? Any suggestions? Features you would like to see? Send me your Feedback below. /cancel",
+			'reply_markup' => array ('force_reply' => true)
+
+	));
+}
 function inlineBtnLeaderBoardPressed($chat_id, $message_id){
 	
 	//
 	$db = new PDO ( DSN.';dbname='.dbname, username, password );
 	$db->exec("SET NAMES utf8");
 	
-	$stmt = $db->prepare('SELECT pts_total, username FROM gameGuesser.player ORDER BY pts_total DESC LIMIT 10');
+	$stmt = $db->prepare('SELECT pts_total, username FROM gameGuesser.player WHERE pts_total!=0 ORDER BY pts_total DESC LIMIT 10');
 	$stmt->execute();
 	$result = $stmt->fetchAll(PDO::FETCH_ASSOC);
 	
@@ -460,7 +487,7 @@ function inlineBtnLeaderBoardPressed($chat_id, $message_id){
 	
 	$string .= "</pre>%0A<b>This Week</b><pre>%0A";
 	
-	$stmt = $db->prepare('SELECT pts_week, username FROM gameGuesser.player ORDER BY pts_week DESC LIMIT 10');
+	$stmt = $db->prepare('SELECT pts_week, username FROM gameGuesser.player WHERE pts_week!=0 ORDER BY pts_week DESC LIMIT 10');
 	$stmt->execute();
 	$result = $stmt->fetchAll(PDO::FETCH_ASSOC);
 	
@@ -695,6 +722,9 @@ function processCallbackQuery($callbackQuery) {
 			case "exit":
 				updateMessage($chat_id, $message_id, "<b>Welcome to Guess The Game!</b>%0A%0A<pre>Recognize games, fill your collection, earn points, climb the leaderboard!</pre>%0A%0A<i>Hints used: +50pts%0ANo hints used: +500pts</i>", buildMainMenu());
 				break;
+			case "backFresh":
+				sendMessageAndInlineKeyboard($chat_id, "<b>Welcome to Guess The Game!</b>%0A%0A<pre>Recognize games, fill your collection, earn points, climb the leaderboard!</pre>%0A%0A<i>Hints used: +50pts%0ANo hints used: +500pts</i>", buildMainMenu());
+				break;
 		}
 	}
 	else if(isset($JsonCallbackData->answer)) {
@@ -759,6 +789,14 @@ function processCallbackQuery($callbackQuery) {
 		$pressedButton = ceil($elementNo/10); //E.g: Element number 26 would be on page 3.
 		inlinePagingBtnPressed($chat_id, $pressedButton, $message_id);
 	}
+	else if((isset($JsonCallbackData->feedbackMenu))) {
+		$pickedOption = $JsonCallbackData->feedbackMenu;
+		switch ($pickedOption) {
+			case "sendFeedback":
+				inlineBtnSendFeedbackPressed($chat_id, $message_id);
+				break;
+		}
+	}
 	
 	apiRequest ( "answerCallbackQuery", array ("callback_query_id" => $callback_query_id));
 }
@@ -769,6 +807,13 @@ function processMessage($message) {
 	$message_id = $message ['message_id'];
 	$chat_id = $message ['chat'] ['id'];
 
+	if (isset ( $reply )) { // User has responded to bot by force_reply initiated by bot. Field 'reply_to_message' is empty otherwise.
+	
+		if($reply === "Found something not working right? Any suggestions? Features you would like to see? Send me your Feedback below. /cancel") {
+			giveFeedback($message);
+		}
+	
+	}
 	if (isset ( $message ['text'] )) { // User has send text - Either by typing or pressing button
 
 		//The bot will react only to following commands given by the bot's user. All of them are entered by either keyboard button pressing or usage of bot's command list under "/".
@@ -783,6 +828,9 @@ function processMessage($message) {
 			}
 			else
 				sendMessage($chat_id, "Nothing found for <b>$text</b>.");
+		}
+		else if ($text === '/cancel') {
+			sendMessageAndInlineKeyboard($chat_id, "<b>Welcome to Guess The Game!</b>%0A%0A<pre>Recognize games, fill your collection, earn points, climb the leaderboard!</pre>%0A%0A<i>Hints used: +50pts%0ANo hints used: +500pts</i>", buildMainMenu());
 		}
 	
 	}
