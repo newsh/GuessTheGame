@@ -4,7 +4,7 @@ Simple quiz game for Telegram messenger. Try to guess the title by looking at sc
 
 Check it our here: https://telegram.me/gameguesserbot
 
-###Features
+### Features
 - over 10.000 screenshots / questions
 
 - hint system
@@ -13,7 +13,9 @@ Check it our here: https://telegram.me/gameguesserbot
 
 - leaderboards
 
-###Preview
+### Preview
+
+
  ![picture2 of telegram_bot](https://i.imgur.com/sXANtP3.png)
  
  ![picture1 of telegram_bot](https://i.imgur.com/hbi7VpI.png) 
